@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from dataset4ms.transforms import OneHot
+from dataset4ms.transforms.basic import OneHot
 
 class TestOneHot(unittest.TestCase):
     def test_onehot(self):

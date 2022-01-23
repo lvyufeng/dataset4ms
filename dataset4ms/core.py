@@ -1,5 +1,7 @@
-from signal import raise_signal
+from typing import OrderedDict
+from charset_normalizer import logging
 import mindspore._c_dataengine as cde
+from sympy import Or
 
 class Dataset:
     def __init__(self) -> None:
@@ -26,8 +28,13 @@ class DataProcess:
         self.column_types = kwargs.get('column_types', None)
         self.source_len = kwargs.get('source_len', None)
 
+        if self.column_names is None:
+            self.column_names = [str(idx) for idx in range(len(self.dataset[0]))]
+
         self.ir_tree = []
         self._init_generator_node()
+
+        self._transforms = OrderedDict({name: [] for name in self.column_names})
 
     def _init_cde_runtime_context(self):
         self._runtime_context = cde.PythonRuntimeContext()
@@ -35,20 +42,29 @@ class DataProcess:
     
     def _init_generator_node(self):
         node = cde.GeneratorNode(
-            self.dataset,
+            (lambda: _iter_fn(self.dataset)),
             self.column_names,
-            self.column_types,
-            self.source_len,
-            self.sampler,
+            [],
+            len(self.dataset),
+            None,
             self.num_parallel_workers
         )
         self.ir_tree.append(node)
 
     def _transform(self, data):
-        pass
+        def transform_column(column_data, transforms):
+            for transform in transforms:
+                column_data = transform(column_data)
+            return column_data
 
-    def map(self, fn):
-        pass
+        return list(map(transform_column, data, self._transforms.values()))
+
+    def map(self, fn, column_name=None):
+        if column_name is None:
+            column_name = self.column_names[0]
+            logging.warning(f"The column name is None, the transform {fn} will be applied "
+                            f"on the first column with automatic named {column_name}")
+        self._transforms[column_name].append(fn)
 
     def __iter__(self):
         pass
@@ -57,7 +73,13 @@ class DataProcess:
         pass
 
     def __getitem__(self, index):
-        pass
+        if self._transforms:
+            return self._transform(self.dataset[index])
+        return self.dataset[index]
 
     def __len__(self):
         return len(self.dataset)
+
+def _iter_fn(dataset):
+    for val in dataset:
+        yield val
