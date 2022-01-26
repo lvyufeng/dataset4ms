@@ -1,7 +1,13 @@
+import logging
+import numpy as np
 from typing import OrderedDict
-from charset_normalizer import logging
 import mindspore._c_dataengine as cde
-from sympy import Or
+
+OffloadToManualOffloadMode = {
+    None: cde.ManualOffloadMode.UNSPECIFIED,
+    False: cde.ManualOffloadMode.DISABLED,
+    True: cde.ManualOffloadMode.ENABLED
+}
 
 class Dataset:
     def __init__(self) -> None:
@@ -26,7 +32,11 @@ class DataProcess:
         self.num_parallel_workers = num_parallel_workers
         self.column_names = kwargs.get('column_names', None)
         self.column_types = kwargs.get('column_types', None)
-        self.source_len = kwargs.get('source_len', None)
+        self.source_len = len(self.dataset)
+
+        self.shuffle = kwargs.get('shuffle', False)
+        self.shuffle_buffer = kwargs.get('shuffle_buffer', 32)
+
 
         if self.column_names is None:
             self.column_names = [str(idx) for idx in range(len(self.dataset[0]))]
@@ -45,7 +55,7 @@ class DataProcess:
             (lambda: _iter_fn(self.dataset)),
             self.column_names,
             [],
-            len(self.dataset),
+            self.source_len,
             None,
             self.num_parallel_workers
         )
@@ -65,9 +75,17 @@ class DataProcess:
             logging.warning(f"The column name is None, the transform {fn} will be applied "
                             f"on the first column with automatic named {column_name}")
         self._transforms[column_name].append(fn)
+        self.ir_tree.append(
+            cde.MapNode(self.ir_tree[-1], [fn], [column_name], [], [], [], 16, OffloadToManualOffloadMode[None])
+        )
 
     def __iter__(self):
-        pass
+        consumer = cde.PythonIteratorConsumer(self.num_epochs)
+        consumer.Init(self.ir_tree[0])
+        self._runtime_context.AssignConsumer(consumer)
+        self._iterator = self._runtime_context.GetConsumer()
+        for _ in range(self.source_len):
+            yield self._iterator.GetNextAsList()
 
     def _get_iterator(self):
         pass
@@ -78,7 +96,8 @@ class DataProcess:
         return self.dataset[index]
 
     def __len__(self):
-        return len(self.dataset)
+        return self.source_len
+
 
 def _iter_fn(dataset):
     for val in dataset:

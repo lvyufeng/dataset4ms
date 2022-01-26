@@ -8,7 +8,7 @@ class TestDataProcess(unittest.TestCase):
         class TestDataset(Dataset):
             def __init__(self) -> None:
                 super().__init__()
-                self.labels = [0, 1, 0, 0, 1]
+                self.labels = np.random.sample((5, 1))
                 self.data = np.random.randn(5, 10)
             
             def __getitem__(self, index):
@@ -23,4 +23,6 @@ class TestDataProcess(unittest.TestCase):
     def test_dataprocess(self):
         dataprocess = DataProcess(self.test_data, column_names=['data', 'label'])
         dataprocess.map(OneHot(2), 'label')
-        print(dataprocess[0])
+
+        for i in dataprocess:
+            print(i)
